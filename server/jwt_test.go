@@ -31,6 +31,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats-server/v2/internal/testhelper"
+
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
@@ -5930,4 +5932,145 @@ func TestJWTAccountConnzAccessAfterClaimUpdate(t *testing.T) {
 	updateJWT(sjwt)
 	// If export was wiped this would fail with timeout.
 	doRequest()
+}
+
+func TestJWTCrossAccountFAIL(t *testing.T) {
+	sysKp, syspub := createKey(t)
+	sysClaim := jwt.NewAccountClaims(syspub)
+	sysClaim.Name = "sys"
+	sysJwt := encodeClaim(t, sysClaim, syspub)
+	sysCreds := newUser(t, sysKp)
+	defer removeFile(t, sysCreds)
+
+	// create four jwt, one with and one without mapping
+	aExpK, aExpPub := createKey(t)
+	aExpClaim := jwt.NewAccountClaims(aExpPub)
+	aExpClaim.Name = "exp"
+	aExpClaim.Limits.JetStreamLimits.Streams = 3
+	aExpClaim.Limits.JetStreamLimits.Consumer = 3
+	aExpClaim.Limits.JetStreamLimits.DiskStorage = -1
+	aExpClaim.Limits.JetStreamLimits.MemoryStorage = -1
+	aExpJwt := encodeClaim(t, aExpClaim, aExpPub)
+
+	dirSrv := createDir(t, "srv")
+	defer removeDir(t, dirSrv)
+	storeDir := createDir(t, JetStreamStoreDir)
+	defer removeDir(t, storeDir)
+	conf := createConfFile(t, []byte(fmt.Sprintf(`
+		listen: 127.0.0.1:-1
+		operator: %s
+		system_account: %s
+		resolver: {
+			type: full
+			dir: %s
+		}
+		jetstream: {
+			max_mem_store: 10Mb, 
+			max_file_store: 10Mb
+			store_dir: %s
+			domain: foo
+		}
+    `, ojwt, syspub, dirSrv, storeDir)))
+	defer removeFile(t, conf)
+	srv, _ := RunServerWithConfig(conf)
+	defer srv.Shutdown()
+	updateJwt(t, srv.ClientURL(), sysCreds, sysJwt, 1)
+	updateJwt(t, srv.ClientURL(), sysCreds, aExpJwt, 1)
+
+	dl := testhelper.NewDummyLogger(500)
+	srv.SetLoggerV2(dl, true, true, true)
+
+	// Setup account owner
+	ncExp := natsConnect(t, srv.ClientURL(), createUserCreds(t, nil, aExpK))
+	jsExp, err := ncExp.JetStream()
+	require_NoError(t, err)
+
+	ch := jsExp.StreamNames()
+	select {
+	case m := <-ch:
+		t.Logf("got stream names %s", m)
+	case <-time.After(2 * time.Second):
+		t.FailNow()
+	}
+
+	dl.Warnf("\n\n----------\n\n")
+	_, err = jsExp.AddStream(&nats.StreamConfig{
+		Name:     "stream-import-only",
+		Subjects: []string{"stream-import-only"},
+	})
+	//require_Error(t, err, errors.New("context deadline exceeded"))
+	dl.Warnf("\n\n----------\n\n")
+
+	// Fails with same as well as different connection
+	//ncExp2 := natsConnect(t, srv.ClientURL(), createUserCreds(t, nil, aExpK))
+	//jsExp2, err := ncExp2.JetStream()
+	//require_NoError(t, err)
+	ch = jsExp.StreamNames()
+	select {
+	case <-ch:
+		return
+	case <-time.After(2 * time.Second):
+	}
+	t.Log("\n\n\n\ntimeout\n")
+	for _, m := range dl.AllMsgs {
+		t.Log(m)
+	}
+	t.FailNow()
+}
+
+func TestCfgCrossAccountFAIL(t *testing.T) {
+	storeDir := createDir(t, JetStreamStoreDir)
+	defer removeDir(t, storeDir)
+	conf := createConfFile(t, []byte(fmt.Sprintf(`
+		listen: 127.0.0.1:-1
+		jetstream: {
+			max_mem_store: 10Mb, 
+			max_file_store: 10Mb
+			store_dir: %s
+			domain: foo
+		}
+    `, storeDir)))
+	defer removeFile(t, conf)
+	srv, _ := RunServerWithConfig(conf)
+	defer srv.Shutdown()
+
+	dl := testhelper.NewDummyLogger(500)
+	srv.SetLoggerV2(dl, true, true, true)
+
+	// Setup account owner
+	ncExp := natsConnect(t, srv.ClientURL())
+	jsExp, err := ncExp.JetStream()
+	require_NoError(t, err)
+
+	ch := jsExp.StreamNames()
+	select {
+	case m := <-ch:
+		t.Logf("got stream names %s", m)
+	case <-time.After(2 * time.Second):
+		t.FailNow()
+	}
+
+	dl.Warnf("\n\n----------\n\n")
+	_, err = jsExp.AddStream(&nats.StreamConfig{
+		Name:     "stream-import-only",
+		Subjects: []string{"stream-import-only"},
+	})
+	//require_Error(t, err, errors.New("context deadline exceeded"))
+	dl.Warnf("\n\n----------\n\n")
+
+	// Fails with same as well as different connection
+	//ncExp2 := natsConnect(t, srv.ClientURL(), createUserCreds(t, nil, aExpK))
+	//jsExp2, err := ncExp2.JetStream()
+	//require_NoError(t, err)
+	ch = jsExp.StreamNames()
+	select {
+	case <-ch:
+		return
+	case <-time.After(2 * time.Second):
+	}
+	t.Log("\n\n\n\ntimeout\n")
+	for _, m := range dl.AllMsgs {
+		t.Log(m)
+	}
+	t.FailNow()
 }

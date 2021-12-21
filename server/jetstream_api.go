@@ -1117,9 +1117,16 @@ func (s *Server) jsStreamCreateRequest(sub *subscription, c *client, a *Account,
 	if c == nil || !s.JetStreamEnabled() {
 		return
 	}
+
 	ci, acc, _, msg, err := s.getRequestInfo(c, rmsg)
 	if err != nil {
 		s.Warnf(badAPIRequestT, msg)
+		return
+	}
+	fmt.Printf("jsStreamCreateRequest \n")
+	s.Warnf("jsStreamCreateRequest \n")
+	if true {
+		s.Warnf("Simulate jsStreamCreateRequest failure")
 		return
 	}
 
@@ -1387,9 +1394,11 @@ func (s *Server) jsStreamUpdateRequest(sub *subscription, c *client, _ *Account,
 
 // Request for the list of all stream names.
 func (s *Server) jsStreamNamesRequest(sub *subscription, c *client, _ *Account, subject, reply string, rmsg []byte) {
+	fmt.Printf("AAAAA\n\n\n")
 	if c == nil || !s.JetStreamEnabled() {
 		return
 	}
+	s.Warnf("jsStreamNamesRequest")
 	ci, acc, _, msg, err := s.getRequestInfo(c, rmsg)
 	if err != nil {
 		s.Warnf(badAPIRequestT, msg)

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -2879,6 +2880,10 @@ func (s *Server) updateAccountClaimsWithRefresh(a *Account, ac *jwt.AccountClaim
 	if a == nil {
 		return
 	}
+
+	s.Warnf("updateAccountClaimsWithRefresh %s %s %d", a.Name, a.nameTag, a.sl.Count())
+	defer s.Warnf("updateAccountClaimsWithRefresh %s %s %d", a.Name, a.nameTag, a.sl.Count())
+	debug.PrintStack()
 	s.Debugf("Updating account claims: %s/%s", a.Name, ac.Name)
 	a.checkExpiration(ac.Claims())
 
